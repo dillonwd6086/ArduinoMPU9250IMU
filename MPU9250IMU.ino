@@ -2,6 +2,7 @@
 #include <Wire.h>
 
 #define MPU9250ADDRESS 	0x68
+#define MAGADDRESS		0x0C
 #define GYRO250DPS 		0x00
 #define ACCSCALE2G 		0x00
 #define GYROCONFIGREG 	0x1B
@@ -30,9 +31,9 @@ void loop(){
 	int16_t xAcl, yAcl, zAcl;
 	int16_t temp;
 
-	//call the method to grab the newest data form the sensor
 	getSensorData(rollAcl, pitchAcl, yawAcl, xAcl, yAcl, zAcl, temp);
 
+	//call the method to grab the newest data form the sensor
 	//Scale the data from the gyroscope
 	rollAcl /= 161.0;
 	pitchAcl /= 161.0;
@@ -45,16 +46,16 @@ void loop(){
 	//Find out how long ago before the last update
 	double elapsedTime = ((double) millis() - time) / 1000.0;
 
+	Roll -= (rollAcl * elapsedTime);
 	//Integrate roll and pitch
-	Roll -= rollAcl * elapsedTime;
-	Pitch += pitchAcl * elapsedTime;
+	Pitch += (pitchAcl * elapsedTime);
 
 	//update the time
 	time = millis();
 
 	//Time to find Roll and Pitch based on the Accelerometer
 	double AclRoll = (atan2(-xAcl, zAcl) * 180.0) / PI;
-	double AclPitch = (atan2(xAcl, sqrt(yAcl * yAcl + xAcl * zAcl)) * 180.0) / PI;
+	double AclPitch = ((double) atan2(xAcl, sqrt(((float) yAcl * (float) yAcl) + ((float) zAcl * (float) zAcl))) * 180.0) / PI;
 
 	//Filter out garbage from accelerometer
 	long forceApx = abs(yAcl) + abs(xAcl) + abs(zAcl);
@@ -69,10 +70,17 @@ void loop(){
 
 	}
 
+	int16_t garbage, mx;
+	
+	getMagnetometerData(mx, garbage, garbage);
+
 	Serial.print("Roll: ");
 	Serial.print(Roll);
 	Serial.print(" Pitch: ");
-	Serial.println(Pitch);
+	Serial.print(Pitch);
+	Serial.print(" Yaw: ");
+	Serial.println(Yaw);
+	delay(100);
 
 }
 void I2CwriteByte(uint8_t address, uint8_t reg, uint8_t data){
@@ -125,7 +133,43 @@ void initMPU9250(){
 	I2CwriteBit(MPU9250ADDRESS, GYROCONFIGREG, 2, 3, 3);
 
 }
+void initMPUMagnetometer(){
 
+	//Set the control register to Continous Mesaurment mode 1
+	//"0000": Power-down mode
+	//"0001": Single measurement mode
+	//"0010": Coninous measurement mode 1
+	//"0110": Continous measurement mode 2
+	//"0100": External trigger measurement mode
+	//"1000": Self-test mode
+	//"1111": Fuse  ROM access mode
+	I2CwriteByte(MAGADDRESS, 0x0A, 2);
+
+}
+void getMagnetometerData(int16_t& mx, int16_t& my, int16_t& mz){
+
+	//Start talking to the magnetometer
+	Wire.beginTransmission(MAGADDRESS);
+
+	//Specify the starting register
+	Wire.write(0x03);
+
+	//Let the wire library know more stuff is to come
+	Wire.endTransmission(false);
+
+	//Specify how many regisetrs you are are going to read, three
+	//16 bit values split into two 8bit registers a piece so 6 registers
+	Wire.requestFrom(MAGADDRESS, 6, true);
+
+	//0x3H (HXL) & 0x4H (HXH)
+	mx << Wire.read() <<8| Wire.read();
+
+	//0x5H (HYL) & 0x6H (HYH)
+	my << Wire.read() <<8| Wire.read();
+
+	//0x7H (HZL) & 0x8H (HZH)
+	mz << Wire.read() <<8| Wire.read();
+}
 void getSensorData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az, int16_t& temp){
 	
 	//Start talking to the sensor
